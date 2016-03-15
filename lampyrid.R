@@ -20,7 +20,6 @@ lampyrid$year<-year(lampyrid$newdate)
 #because you don't have to deal with day-of-month numbers starting over 
 #in the middle of a phenological event.
 lampyrid$DOY<-yday(lampyrid$newdate)
-<<<<<<< HEAD
 lampyrid$week<-week(lampyrid$newdate)
 
 # download weather data, read table not csv, blank values are NA
