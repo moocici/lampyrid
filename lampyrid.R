@@ -304,6 +304,26 @@ lampyrid.week<-ggplot(lampyrid.weather,aes(week,ADULTS,color=factor(year)))+
   geom_point()
 lampyrid.week
 
-# we're interested in lookng at more general trends. We'll 
-library(plyr)
 
+# we're interested in looking at more general trends. We'll need to produce 
+#summary data to do this
+
+library(plyr)
+captures.by.year<-ddply(lampyrid.weather, c("year"), summarise,
+                        total=sum(ADULTS), traps=length(ADULTS), avg=sum(ADULTS/length(ADULTS)))
+
+captures.by.week.year<-ddply(lampyrid.weather, c("year", "week"), summarise,
+                             total=sum(ADULTS), traps=length(ADULTS), 
+                             avg=sum(ADULTS/length(ADULTS)),
+                             ddacc=max(dd.accum))
+
+
+lampyrid.summary.week<-ggplot(captures.by.week.year, aes(week, avg, 
+                                                         color=factor(year)))+
+  geom_point()+geom_smooth(se=FALSE)
+lampyrid.summary.week
+
+lampyrid.summary.ddacc<-ggplot(captures.by.week.year, aes(ddacc, avg, 
+                                                          color=factor(year)))+
+  geom_point()+geom_smooth(se=FALSE)
+lampyrid.summary.ddacc
