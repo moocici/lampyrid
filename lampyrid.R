@@ -13,6 +13,7 @@ lampyrid <-read.url("https://ndownloader.figshare.com/files/3686040")
 #clean data
 #fix dates, make them ISO'ed
 library(lubridate)
+library(ISOweek)
 lampyrid$newdate<-mdy(lampyrid$DATE)
 #extract year
 lampyrid$year<-year(lampyrid$newdate)
@@ -20,7 +21,7 @@ lampyrid$year<-year(lampyrid$newdate)
 #because you don't have to deal with day-of-month numbers starting over 
 #in the middle of a phenological event.
 lampyrid$DOY<-yday(lampyrid$newdate)
-lampyrid$week<-week(lampyrid$newdate)
+lampyrid$week<-ISOweek(lampyrid$newdate)
 
 # download weather data, read table not csv, blank values are NA
 read.url <- function(url, ...){
@@ -87,7 +88,7 @@ weather<-read.table(file="http://lter.kbs.msu.edu/datatables/7.csv",
 #it's convenient living where we do! 
 
 weather$DOY<-yday(weather$date)
-weather$week<-week(weather$date)
+weather$week<-ISOweek(weather$date)
 
 #do a few simple plots to make sure the data makes sense -this is
 #a good way to check that the importation was sucessful
@@ -327,3 +328,6 @@ lampyrid.summary.ddacc<-ggplot(captures.by.week.year, aes(ddacc, avg,
                                                           color=factor(year)))+
   geom_point()+geom_smooth(se=FALSE)
 lampyrid.summary.ddacc
+
+library(pscl)
+lam_model<-glm(ADULTS~week+HABITAT+as.factor(year))
