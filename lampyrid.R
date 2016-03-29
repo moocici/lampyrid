@@ -21,24 +21,8 @@ lampyrid$year<-year(lampyrid$newdate)
 #because you don't have to deal with day-of-month numbers starting over 
 #in the middle of a phenological event.
 lampyrid$DOY<-yday(lampyrid$newdate)
-lampyrid$week<-ISOweek(lampyrid$newdate)
-
-# download weather data, read table not csv, blank values are NA
-read.url <- function(url, ...){
-  tmpFile <- tempfile()
-  download.file(url, destfile = tmpFile, method = "curl")
-  url.data <- read.csv(tmpFile, ...)
-  return(url.data)
-}
-weather <-read.table("http://lter.kbs.msu.edu/datatables/7.csv", 
-                     header=T, sep=',', na.strings = "")
-
-weather$DOY<-yday(weather$date)
-# quick xy plot
-plot(weather$DOY,weather$air_temp_min)
-plot(weather$DOY,weather$air_temp_max)
-plot(weather$DOY,weather$precipitation)
-
+#use ISO week, so we start counting on Monday, not Jan 1 COOL!
+lampyrid$week<-isoweek(lampyrid$newdate)
 
 #let's look for the data problems we found we used OpenRefine and see if
 #we can impliment our cleaning operations here- that way we have a complete
@@ -88,8 +72,7 @@ weather<-read.table(file="http://lter.kbs.msu.edu/datatables/7.csv",
 #it's convenient living where we do! 
 
 weather$DOY<-yday(weather$date)
-weather$week<-ISOweek(weather$date)
-
+weather$week<-isoweek(weather$date)
 #do a few simple plots to make sure the data makes sense -this is
 #a good way to check that the importation was sucessful
 
@@ -295,27 +278,33 @@ plot(weather$DOY, weather$dd.accum)
 #let's put it all together in one frame
 lampyrid.weather<-merge(lampyrid, weather, by=c("year", "DOY", "week"), all.x=TRUE)
 
+#let's take a look at our data now and see what patterns we can see
+
 library(ggplot2)
 
-lampyrid.doy<-ggplot(lampyrid.weather,aes(DOY,ADULTS,color=factor(year)))+
+#plot raw 
+lampyrid.doy<-ggplot(lampyrid.weather, aes(DOY, ADULTS, 
+                                           color=factor(year)))+
   geom_point()
-lampyrid.doy
 
-lampyrid.week<-ggplot(lampyrid.weather,aes(week,ADULTS,color=factor(year)))+
+lampyrid.doy
+lampyrid.week<-ggplot(lampyrid.weather, aes(week, ADULTS, 
+                                            color=factor(year)))+
   geom_point()
 lampyrid.week
-
 
 # we're interested in looking at more general trends. We'll need to produce 
 #summary data to do this
 
 library(plyr)
+
+
 captures.by.year<-ddply(lampyrid.weather, c("year"), summarise,
-                        total=sum(ADULTS), traps=length(ADULTS), avg=sum(ADULTS/length(ADULTS)))
+                        total=sum(ADULTS), traps=length(ADULTS), avg=sum(ADULTS)/length(ADULTS), ddacc=max(dd.accum))
 
 captures.by.week.year<-ddply(lampyrid.weather, c("year", "week"), summarise,
                              total=sum(ADULTS), traps=length(ADULTS), 
-                             avg=sum(ADULTS/length(ADULTS)),
+                             avg=sum(ADULTS)/length(ADULTS),
                              ddacc=max(dd.accum))
 
 
@@ -329,5 +318,30 @@ lampyrid.summary.ddacc<-ggplot(captures.by.week.year, aes(ddacc, avg,
   geom_point()+geom_smooth(se=FALSE)
 lampyrid.summary.ddacc
 
+captures.by.treatment<-ddply(lampyrid.weather, c("year", "TREAT_DESC"), summarise,
+                             total=sum(ADULTS), traps=length(ADULTS), avg=sum(ADULTS)/length(ADULTS))
+
+lampyrid.summary.treatment<-ggplot(captures.by.treatment, aes(year, avg, 
+                                                              color=factor(TREAT_DESC)))+
+  geom_point()+geom_smooth(se=FALSE)
+lampyrid.summary.treatment
+
+
+captures.by.habitat<-ddply(lampyrid.weather, c("year", "HABITAT"), summarise,
+                           total=sum(ADULTS), traps=length(ADULTS), avg=sum(ADULTS)/length(ADULTS))
+
+lampyrid.summary.habitat<-ggplot(captures.by.habitat, aes(year, avg, 
+                                                          color=factor(HABITAT)))+
+  geom_point()+geom_smooth(se=FALSE)
+lampyrid.summary.habitat
+
+
+
+ddacc.summary.year<-ggplot(captures.by.year, aes(x=as.factor(year), y=ddacc, fill=as.factor(year)))+
+  geom_bar(stat="identity")
+ddacc.summary.year
+
+
 library(pscl)
-lam_model<-glm(ADULTS~week+HABITAT+as.factor(year))
+lam_model<-glm(ADULTS~week+HABITAT+as.factor(year), data=lampyrid.weather, family="poisson")
+summary(lam_model)
