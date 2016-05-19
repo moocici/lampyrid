@@ -590,6 +590,7 @@ lampyrid.weather$dd.accum2<-(lampyrid.weather$dd.accum)^2
 lam_model<-glm(ADULTS~dd.accum+dd.accum2*(as.factor(year)+rain.days)+TREAT_DESC, 
                offset=TRAPS, data=lampyrid.weather, family=negative.binomial(0.6))
 summary(lam_model)
+# theta is the dispersion q
 
 #Let's just do a quick look to see how our model predictions look
 x<-(1:length(lampyrid.weather$DOY))
