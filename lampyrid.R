@@ -1,5 +1,7 @@
-# Fail
-# lampyrid <- read.csv("https://ndownloader.figshare.com/files/3686040", header=T)
+# lampyrid analysis
+#bring data in from figshare
+
+# Fail: lampyrid <- read.csv("https://ndownloader.figshare.com/files/3686040", header=T)
 # Need some function to help with it
 # Win
 read.url <- function(url, ...){
@@ -9,6 +11,17 @@ read.url <- function(url, ...){
   return(url.data)
 }
 lampyrid <-read.url("https://ndownloader.figshare.com/files/3686040")
+
+#we're going to be looking at the responses of lampyrids to environmental conditions
+#this means making some choices about when to stat counting
+#what day of the year should we start the analysis on? 
+#giving it a start day of Mar 1
+start<-60
+
+#coding the variable like this makes it easy to re-run the code with different start dates
+#to see what the effect of the start date has on our conclusions. this type of testing is 
+#often referred to as 'sensitivity analysis'- ie seeing how sensitive your conclusions are to
+#your  assumptions, guesses or starting points.
 
 #clean data
 #fix dates, make them ISO'ed
@@ -21,7 +34,9 @@ lampyrid$year<-year(lampyrid$newdate)
 #because you don't have to deal with day-of-month numbers starting over 
 #in the middle of a phenological event.
 lampyrid$DOY<-yday(lampyrid$newdate)
-#use ISO week, so we start counting on Monday, not Jan 1, COOL!
+#use ISO week, so we start counting on Monday, not Jan 1, COOL! Our sampling usually 
+#takes place Wed-Friday, so if we use week of year stating on Jan 1, there is a good chance that
+#samples taken within a sampling week would get grouped incorrectly when we go to do the analysis.
 lampyrid$week<-isoweek(lampyrid$newdate)
 
 #let's look for the data problems we found we used OpenRefine and see if
@@ -42,10 +57,14 @@ summary(lampyrid)
 summary(as.factor(lampyrid$TREAT_DESC))
 #wow, we've got some spelling errors. Let's clean that up
 
-lampyrid$TREAT_DESC<-gsub("Early succesional community", "Early successional community", lampyrid$TREAT_DESC)
-lampyrid$TREAT_DESC<-gsub("Early sucessional community", "Early successional community", lampyrid$TREAT_DESC)
+lampyrid$TREAT_DESC<-gsub("Early succesional community", "Early successional", lampyrid$TREAT_DESC)
+lampyrid$TREAT_DESC<-gsub("Early sucessional community", "Early successional", lampyrid$TREAT_DESC)
 lampyrid$TREAT_DESC<-gsub("Succesional", "Successional", lampyrid$TREAT_DESC)
 lampyrid$TREAT_DESC<-gsub("Sucessional", "Successional", lampyrid$TREAT_DESC)
+#also shorten biologically based (organic) and conventional till for plotting purposes 
+lampyrid$TREAT_DESC<-gsub("Biologically based \\(organic\\)", "Organic", lampyrid$TREAT_DESC)
+lampyrid$TREAT_DESC<-gsub("Conventional till", "Conventional", lampyrid$TREAT_DESC)
+
 #also convert this column to factor (gsub sometimes turns it into character type)
 lampyrid$TREAT_DESC<-as.factor(lampyrid$TREAT_DESC)
 summary(lampyrid$TREAT_DESC)
@@ -299,15 +318,20 @@ accum.allen<-function(maxi, mini, thresh, DOY, startday){
   return (dd.accum)
 }
 
-#same sort of checks. Run the function for our data, giving it a sart day of Mar 15 (DOY 74)
+#same sort of checks. Run the function for our data
 
-weather$dd.accum<-accum.allen(weather$air_temp_max_clean, weather$air_temp_min_clean, 10, weather$DOY, 74)
+weather$dd.accum<-accum.allen(weather$air_temp_max_clean, weather$air_temp_min_clean, 10, weather$DOY, start)
 #and plot that thing to look for problems:
 plot(weather$DOY, weather$dd.accum)
 #looks good! victory!!!
 
+#let's also compute degree day accumulation from the beginning of year- we may need to see how the winter affected 
+#the lampyrids if we can't explain all the variation
+weather$dd.accum0<-accum.allen(weather$air_temp_max_clean, weather$air_temp_min_clean, 10, weather$DOY, 1)
+
+
 #but what about preciptiation? our lit search indicated that there could be
-#important things going on with rain and lampyrids. Firstl let's calculate the 
+#important things going on with rain and lampyrids. First let's calculate the 
 #precipitation accumulation over the week, then let's look at the number of rainy 
 #days in a week
 
@@ -353,6 +377,42 @@ rainy.days<-function (precip, week){
 #and now the rain day counter
 weather$rain.days<-rainy.days(weather$precipitation, weather$week)
 
+#finally, we need to be able to compute the accumulated precipitation over the season from a given timepoint
+#another function? I think SO! base this one on the degree day accumulation function 
+
+
+accum.precip.time<-function(precip, DOY, startday){
+  #if startday is not given, assume it's day 1
+  if(missing(startday)) {
+    startday<-1
+  } else {
+    startday<-startday
+  }
+  prec.accum<-c()
+  for (i in 1:length(DOY)){
+    #hmm, need a way to sum up over the year, starting anew for each year.
+    #this should do it
+    if (DOY[i]==1){
+      prec.accum.day=0
+    }
+    #the accumulation on day i is the precip accumulation before
+    #plus the precip accumulated on that day
+    prec.accum.day<-prec.accum.day+precip[i]
+    
+    #but if the precip is accumulating before the startday, we want to forget them
+    if (DOY[i]<startday){
+      prec.accum.day=0
+    }
+    #add that day's accumulation to the vector
+    prec.accum<-c(prec.accum, prec.accum.day)
+  }
+  return (prec.accum)
+}
+
+weather$prec.accum.0<-accum.precip.time(weather$precipitation, weather$DOY, start)
+#and plot that thing to look for problems:
+plot(weather$DOY, weather$prec.accum.0)
+
 #now we need to summarize the weather data so it gives us the information we want at a weekly resolution
 #just like we have for the fireflies
 library(plyr)
@@ -360,7 +420,7 @@ library(plyr)
 weather1<-ddply(weather, c("year", "week"), summarise,
                 Tmax=max(air_temp_max_clean), Tmin=min(air_temp_min_clean), 
                 dd.accum=max(dd.accum), prec.accum=max(prec.accum), 
-                rain.days=sum(rain.days))
+                rain.days=sum(rain.days), prec.accum.0=max(prec.accum.0))
 
 
 #so, now we have two datasets that both have information we need in them.
@@ -373,16 +433,44 @@ lampyrid.weather<-merge(lampyrid, weather1, by=c("year","week"), all.x=TRUE)
 
 library(ggplot2)
 
-#plot raw 
-lampyrid.doy<-ggplot(lampyrid.weather, aes(DOY, ADULTS, 
-                                           color=factor(year)))+
-  geom_point()
+#create a palatte based on colour brewer. We want to use 'Spectral' for year data
+#but we have one extra year, so we have to create a palette manually
+#just extract the hex from colorbrewer, and find an additional shade that works on one of the ends
 
+pal<-c('#a50026','#d73027','#f46d43','#fdae61','#fee090','#ffffbf','#e0f3f8','#abd9e9','#74add1','#4575b4','#313695', '#050561')
+pal1<-c('#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b','#ffffbf','#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2', '#a3297a')
+
+#plot raw 
+lampyrid.doy<-ggplot(lampyrid.weather, aes(DOY, ADULTS, fill=as.factor(year)))+
+  scale_fill_manual(values=pal)+
+  geom_point(colour="black", pch=21, size=4)+
+  theme_bw(base_size = 20)+
+  facet_wrap(~year)+
+  guides(fill=FALSE)+
+  xlab("Day")+
+  ylab("# Adults captured")
 lampyrid.doy
-lampyrid.week<-ggplot(lampyrid.weather, aes(week, ADULTS, 
-                                            color=factor(year)))+
-  geom_point()
+
+#save to pdf
+pdf("lampyriddoy.pdf", height=6, width=8)
+lampyrid.doy
+dev.off()
+
+#plot by sample week
+lampyrid.week<-ggplot(lampyrid.weather, aes(week, ADULTS, fill=factor(year)))+
+  scale_fill_manual(values=pal)+
+  geom_point(colour="black", pch=21, size=4)+
+  theme_bw(base_size = 20)+
+  facet_wrap(~year)+
+  guides(fill=FALSE)+
+  xlab("Week")+
+  ylab("# Adults captured")
 lampyrid.week
+
+#save to pdf
+pdf("lampyridweek.pdf", height=6, width=8)
+lampyrid.week
+dev.off()
 
 # we're interested in looking at more general trends. We'll need to produce 
 #summary data to do this
@@ -399,16 +487,62 @@ captures.by.week.year<-ddply(lampyrid.weather, c("year", "week"), summarise,
 
 #look at captures by week, over the growing season, by year
 lampyrid.summary.week<-ggplot(captures.by.week.year, aes(week, avg, 
-                                                         color=factor(year)))+
-  geom_point()+geom_smooth(se=FALSE)
+                                                         fill=as.factor(year)))+
+  scale_fill_manual(values=pal)+
+  geom_smooth(colour="black", se=FALSE)+
+  geom_point(colour="black", pch=21, size=4)+
+  theme_bw(base_size = 20)+
+  guides(fill=guide_legend(title="Year"))+
+  theme(legend.key=element_blank())+
+  xlab("\nWeek")+
+  ylab("Adults per trap\n")
+
 lampyrid.summary.week
 
-#look at captures by degree day accumulation
+#save to pdf
+pdf("lampyridsummaryweek.pdf", height=6, width=8)
+lampyrid.summary.week
+dev.off()
+
+#look at captures by degree day accumulation to see if our activity pattern is clearer
 
 lampyrid.summary.ddacc<-ggplot(captures.by.week.year, aes(ddacc, avg, 
-                                                          color=factor(year)))+
-  geom_point()+geom_smooth(se=FALSE)
+                                                          fill=as.factor(year)))+
+  scale_fill_manual(values=pal)+
+  geom_smooth(colour="black", se=FALSE)+
+  geom_point(colour="black", pch=21, size=4)+
+  theme_bw(base_size = 20)+
+  guides(fill=guide_legend(title="Year"))+
+  theme(legend.key=element_blank())+
+  xlab("\nDegree day accumulation")+
+  ylab("Adults per trap\n")
+
 lampyrid.summary.ddacc
+
+#save to pdf
+pdf("lampyridsummaryddacc.pdf", height=6, width=8)
+lampyrid.summary.ddacc
+dev.off()
+
+#we want to stack these figures together because they are a driect comparison of the predictivity of these two factors
+#since this is a ggplot, we'll need to use arrangegrob. we can alter the panels before feeding them to arrangegrob
+#to remove redundant information and to add labels
+library(gridExtra)
+
+
+#remove legend from panel A, add label
+lampyrid.summary.week1<-lampyrid.summary.week+guides(fill=FALSE)+annotate("text", x=20, y=4.2, label="A", size=14)
+#remove Y axis title from panel B, add label
+lampyrid.summary.ddacc1<-lampyrid.summary.ddacc+ylab(NULL)+annotate("text", x=255, y=4.2, label="B", size=14)
+#stack it together
+grid.arrange(arrangeGrob(lampyrid.summary.week1, lampyrid.summary.ddacc1, ncol=2, widths=c(0.49, 0.55)))
+
+
+#save to pdf
+pdf("lampyridsummaryweekandddacc.pdf", height=6, width=10)
+grid.arrange(arrangeGrob(lampyrid.summary.week1, lampyrid.summary.ddacc1, ncol=2, widths=c(0.49, 0.55)))
+dev.off()
+
 
 #we want to look at captures by treatment 
 #when we look at it by plant community (habitat), things get a little wackier because of the three year crop rotation. 
@@ -417,57 +551,147 @@ lampyrid.summary.ddacc
 captures.by.treatment<-ddply(lampyrid.weather, c("year", "TREAT_DESC"), summarise,
                              total=sum(ADULTS), traps=sum(TRAPS), avg=sum(ADULTS)/sum(TRAPS))
 
+# let's look at captures by treatment in the broadest sense first
+
+treatment.boxplot<-ggplot(captures.by.treatment, aes(factor(TREAT_DESC), avg))+
+  scale_fill_brewer(palette="Set3")+
+  geom_boxplot(aes(fill=factor(TREAT_DESC)), colour="black")+
+  theme_bw(base_size = 20)+
+  guides(fill=FALSE)+
+  xlab("\nTreatment")+
+  ylab("Adults per trap\n")+
+  theme(axis.text.x=element_text(angle=90))
+
+treatment.boxplot
+
+#save to pdf
+pdf("treatmentboxplot.pdf", height=6, width=8)
+treatment.boxplot
+dev.off()
+
+#looks to me like we are most likely to capture fireflies in annual herbaceous crops with the least soil disturbance
+#alfalfa, and no till. Hmm.
+
+
+#and now we look at captures by treatment over the years
+
 lampyrid.summary.treatment<-ggplot(captures.by.treatment, aes(year, avg, 
-                                                              color=factor(TREAT_DESC)))+
-  geom_point()+geom_smooth(se=FALSE)
+                                                              fill=as.factor(TREAT_DESC)))+
+  scale_fill_brewer(palette="Set3")+
+  geom_smooth(colour="black", se=FALSE)+
+  geom_point(colour="black", pch=21, size=4)+
+  theme_bw(base_size = 20)+
+  guides(fill=guide_legend(title="Treatment"))+
+  theme(legend.key=element_blank())+
+  xlab("\nYear")+
+  ylab("Adults per trap\n")
 lampyrid.summary.treatment
 
+#save to pdf
+pdf("lampyridsummarytreatment.pdf", height=6, width=8)
+lampyrid.summary.treatment
+dev.off()
 
-captures.by.habitat<-ddply(lampyrid.weather, c("year", "HABITAT"), summarise,
-                           total=sum(ADULTS), traps=length(ADULTS), avg=sum(ADULTS)/length(ADULTS))
-
-lampyrid.summary.habitat<-ggplot(captures.by.habitat, aes(year, avg, 
-                                                          color=factor(HABITAT)))+
-  geom_point()+geom_smooth(se=FALSE)
-lampyrid.summary.habitat
+#an interesting population cycling pattern emerges, but it doesn't look like there's major changes of crop use
+#At least not at the yearly resolution
+#we can investigate this futher with a multivariate analysis later
+#regardless of how we plot it, we see an interesting pattern in the population variation- basically, a 6-7 year oscillation.
+#so the question is, is there and obvious environmental cause?
 
 #we want to look at captures by treatment relative to degree day accumulation too- are peaks earlier or later by crop? 
 
 captures.by.treatment.dd<-ddply(lampyrid.weather, c("year","week","TREAT_DESC"), summarise,
                                 total=sum(ADULTS), traps=sum(TRAPS), avg=sum(ADULTS)/sum(TRAPS), ddacc=max(dd.accum))
 
+
+
 lampyrid.summary.treatment.dd<-ggplot(captures.by.treatment.dd, aes(ddacc, avg, 
-                                                                    color=factor(TREAT_DESC)))+
-  geom_point()+geom_smooth(se=FALSE)
+                                                                    fill=as.factor(TREAT_DESC)))+
+  scale_fill_brewer(palette="Set3")+
+  geom_point(colour="black", pch=21, size=4)+
+  geom_smooth(colour="black", se=FALSE)+
+  theme_bw(base_size = 20)+
+  guides(fill=guide_legend(title="Treatment"))+
+  theme(legend.key=element_blank())+
+  xlab("\nDegree day accumulation")+
+  ylab("Adults per trap\n")
 lampyrid.summary.treatment.dd
 
-#regardless of how we plot it, we see an interesting pattern in the population variation- basically, a 6-7 year oscillation.
-#so the question is, is there and obvious environmental cause?
-#compute yearly weather summary from weather data (dont want this calulation to be affectred by length of sampling season)
+#save to pdf
+pdf("lampyridsummarytreatmentdd.pdf", height=6, width=8)
+lampyrid.summary.treatment.dd
+dev.off()
+
+#it looks like peaks by degree day accumulation is roughly synced by crop. We'll need to quantify how crop 
+#use varies between crops but it looks like these factors do not interact with time. Good! makes our analysis
+#more strightforward
+
+#Let's see if there's anyting obvious in the weather data that explains the population cycling over time 
+#that we saw above
+
+#compute yearly weather summary from weather data (do't want this calulation to be affectred by length of sampling season)
 weather.by.year<-ddply(weather1, c("year"), summarise,
                        precip=sum(prec.accum), rain.days=sum(rain.days), ddacc=max(dd.accum))
 
 #plot degree day accumulations by year, see if that explains it
 
 ddacc.summary.year<-ggplot(weather.by.year, aes(x=as.factor(year), y=ddacc, fill=as.factor(year)))+
-  geom_bar(stat="identity")
+  scale_fill_manual(values=pal)+
+  geom_bar(stat="identity", colour="black")+
+  theme_bw(base_size = 20)+
+  guides(fill=FALSE)+
+  ylab("\nDegree day accumulation\n")+
+  xlab("\nYear\n")+
+  theme(axis.text.x=element_text(angle=90))
+
 ddacc.summary.year
+
+#save to pdf
+pdf("ddaccsummaryyear.pdf", height=6, width=8)
+ddacc.summary.year
+dev.off()
 
 #what about amount of precipitation? say number of rainy days
 rainday.summary.year<-ggplot(weather.by.year, aes(x=as.factor(year), y=rain.days, fill=as.factor(year)))+
-  geom_bar(stat="identity")
+  scale_fill_manual(values=pal)+
+  geom_bar(stat="identity", colour="black")+
+  theme_bw(base_size = 20)+
+  guides(fill=FALSE)+
+  ylab("\nNumberof rainy days\n")+
+  xlab("\nYear\n")+
+  theme(axis.text.x=element_text(angle=90))
+
 rainday.summary.year
+
+#save to pdf
+pdf("raindaysummaryyear.pdf", height=6, width=8)
+rainday.summary.year
+dev.off()
 
 #and total precipitation
 precip.summary.year<-ggplot(weather.by.year, aes(x=as.factor(year), y=precip, fill=as.factor(year)))+
-  geom_bar(stat="identity")
+  scale_fill_manual(values=pal)+
+  geom_bar(stat="identity", colour="black")+
+  theme_bw(base_size = 20)+
+  guides(fill=FALSE)+
+  ylab("\nTotal precipitation (mm)\n")+
+  xlab("\nYear\n")+
+  theme(axis.text.x=element_text(angle=90))
+
 precip.summary.year
 
-plot(weather.by.year$rain.days,weather.by.year$ddacc)
+#save to pdf
+pdf("precipsummaryyear.pdf", height=6, width=8)
+precip.summary.year
+dev.off()
 
-treatment.boxplot<-ggplot(captures.by.treatment, aes(factor(TREAT_DESC), total))+
-  geom_boxplot(aes(fill=factor(TREAT_DESC)))
-treatment.boxplot
+
+#is there a relationship between rain and degree day accumulation? 
+plot(weather.by.year$precip,weather.by.year$ddacc)
+#not much, though there are a few hot-dry and a few cold-wet years
+#I don't think we need to go down this rabbit hole for the present analysis
+
+
 
 
 #multivariate analysis. So we want to see if the habitat use patterns of the lampyrids have
@@ -498,7 +722,7 @@ landscape.week$sums<-NULL
 #we already computed 'weather.by.year' but will need to also compute the same for 
 #our weekly analysis
 weather.by.week<-ddply(weather1, c("year", "week"), summarise,
-                       precip=sum(prec.accum), rain.days=sum(rain.days), ddacc=max(dd.accum))
+                       precip=max(prec.accum), rain.days=sum(rain.days), ddacc=max(dd.accum), precip.0=max(prec.accum.0))
 
 #now create the environmental matrix, preserving order from the community matricies by
 #creating them from the community matrix
@@ -519,53 +743,92 @@ library(vegan)
 
 ord.year<-metaMDS(landscape.year, autotransform=TRUE)
 ord.year
+
+
+#environmental fit- are any environmental factors driving habitat use patterns? looks like rainy days
+#are the only significant factor
+
+fit.year<-envfit(ord.year~rain.days, env.landscape.year, perm=999)
+summary(fit.year)
+fit.year
+
 #so, MetaMDS assumes the x axis of our matrix is species and y is sites. We are
 #screwing with this by instead looking at sites over samples for one species. So when I call "sites"
 #here I'm actually calling sampling times. Just thought you should know
 
+par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
 plot(ord.year, disp='sites', type='n')
-ordihull(ord.year,groups=env.landscape.year$year,draw="polygon",col="grey90",label=T)
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2004"), col="red")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2005"), col="orange")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2006"), col="yellow")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2007"), col="green")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2008"), col="cyan")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2009"), col="blue")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2010"), col="violet")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2011"), col="purple")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2012"), col="black")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2013"), col="brown")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2014"), col="pink")
-points(ord.year, display='sites', select=which(env.landscape.year$year=="2015"), col="tan")
+with(env.landscape.year, points(ord.year, display = "sites", col = "black", pch = 21, bg = pal[as.factor(year)], cex=1.5))
+plot(fit.year, col="red")
 ordilabel(ord.year, display="species", cex=0.75, col="black")
+with(env.landscape.year, legend("right", legend = levels(as.factor(year)),
+                                bty = "n", col = "black", pch = 21, pt.bg = pal, 
+                                cex=1, pt.cex=1.5, inset=c(-0.2, 0), title="Year"))
 
+
+#save to pdf
+pdf("NMDShabitatuseyear.pdf", height=6, width=8)
+par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
+plot(ord.year, disp='sites', type='n')
+with(env.landscape.year, points(ord.year, display = "sites", col = "black", pch = 21, bg = pal[as.factor(year)], cex=1.5))
+plot(fit.year, col="red")
+ordilabel(ord.year, display="species", cex=0.75, col="black")
+with(env.landscape.year, legend("right", legend = levels(as.factor(year)),
+                                bty = "n", col = "black", pch = 21, pt.bg = pal, 
+                                cex=1, pt.cex=1.5, inset=c(-0.2, 0), title="Year"))
+
+dev.off()
 
 #repeat with week?
 
 ord.week<-metaMDS(landscape.week, autotransform=TRUE)
 ord.week
-#extract data for ggplot
-ord.week.data<- data.frame(MDS1 = ord.week$points[,1], MDS2 = ord.week$points[,2])
-#so, MetaMDS assumes the x axis of our matrix is species and y is sites. We are
-#screwing with this by instead looking at sites over samples for one species. So when I call "sites"
-#here I'm actually calling sampling times. Just thought you should know
-ordfit.week<-envfit(ord.week~as.factor(year)+week+precip+ddacc, data=env.landscape.week, perm=1000)
-summary(ordfit.week)
-ordfit.week
-ordfit.week.data<-as.data.frame(ordfit.week$vectors$arrows*sqrt(ordfit.week$vectors$r))
-ordfit.week.data$species<-rownames(ordfit.week.data)
 
-#lets's make this go! https://oliviarata.wordpress.com/2014/04/17/ordinations-in-ggplot2/ is tutorial I'm using here
+#week and degree day accumulation are the only factors significantly associated with habitat use at the weekly resolution
+fit.week<-envfit(ord.week~week+ddacc, data=env.landscape.week, perm=999)
+summary(fit.week)
+fit.week
 
-ggplot(ord.week.data, aes(MDS1, MDS2, color=as.factor(env.landscape.week$year)))+
-  geom_point()+
-  geom_segment(data=ordfit.week.data,aes(x=0,xend=NMDS1,y=0,yend=NMDS2),
-               #arrow = arrow(length = unit(0.5, "cm")),
-               colour="grey",inherit_aes=FALSE) + 
-  geom_text(data=ordfit.week.data,aes(x=NMDS1,y=NMDS2,label=species),size=5)+
-  coord_fixed()
+par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
+plot(ord.week, disp='sites', type='n')
+with(env.landscape.week, points(ord.week, display = "sites", col = "black", pch = 21, bg = pal[as.factor(year)], cex=0.8))
+plot(fit.week, col="red")
+ordilabel(ord.week, display="species", cex=0.75, col="black")
+with(env.landscape.week, legend("right", legend = levels(as.factor(year)),
+                                bty = "n", col = "black", pch = 21, pt.bg = pal, 
+                                cex=1, pt.cex=1.5, inset=c(-0.2, 0), title="Year"))
 
+#save to pdf
+pdf("NMDShabitatuseweek.pdf", height=6, width=8)
+par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
+plot(ord.week, disp='sites', type='n')
+with(env.landscape.week, points(ord.week, display = "sites", col = "black", pch = 21, bg = pal[as.factor(year)], cex=0.8))
+plot(fit.week, col="red")
+ordilabel(ord.week, display="species", cex=0.75, col="black")
+with(env.landscape.week, legend("right", legend = levels(as.factor(year)),
+                                bty = "n", col = "black", pch = 21, pt.bg = pal, 
+                                cex=1, pt.cex=1.5, inset=c(-0.2, 0), title="Year"))
+dev.off()
 
+#plot two plots together 
+pdf("NMDShabitatuseAB.pdf", height=8, width=8)
+par(mfrow=c(2,1), mar=c(4.1, 4.8, 1.5, 8.1),xpd=TRUE) 
+
+plot(ord.year, disp='sites', type='n')
+with(env.landscape.year, points(ord.year, display = "sites", col = "black", pch = 21, bg = pal[as.factor(year)], cex=0.8))
+plot(fit.year, col="red")
+ordilabel(ord.year, display="species", cex=0.75, col="black")
+with(env.landscape.year, legend("topright", legend = levels(as.factor(year)),
+                                bty = "n", col = "black", pch = 21, pt.bg = pal, 
+                                cex=1, pt.cex=1, inset=c(-0.2, 0), title="Year"))
+text(-0.8,0.25, "A", cex=2)
+
+plot(ord.week, disp='sites', type='n')
+with(env.landscape.week, points(ord.week, display = "sites", col = "black", pch = 21, bg = pal[as.factor(year)], cex=0.8))
+plot(fit.week, col="red")
+ordilabel(ord.week, display="species", cex=0.75, col="black")
+text(-2.33,1.1, "B", cex=2)
+dev.off()
 
 #finally, let's do some generalized linear modelling to see what's important and if we can explain what's going on
 #we've clearly got a quadratic resonse to degree day accumulation, and since we're dealing with count data, we should model 
@@ -587,17 +850,176 @@ lampyrid.weather$dd.accum2<-(lampyrid.weather$dd.accum)^2
 #using glm with a negative binomial family instead. Less elegant and more labour intensive- but really brought residual deviance and AIC
 #values down, indicating a much better fit
 
-lam_model<-glm(ADULTS~dd.accum+dd.accum2*(as.factor(year)+rain.days)+TREAT_DESC, 
+lam_model<-glm(ADULTS~dd.accum+dd.accum2*(as.factor(year))+TREAT_DESC, 
                offset=TRAPS, data=lampyrid.weather, family=negative.binomial(0.6))
 summary(lam_model)
-# theta is the dispersion q
+
 
 #Let's just do a quick look to see how our model predictions look
 x<-(1:length(lampyrid.weather$DOY))
 lampyrid.weather$predicted<-(exp(predict(lam_model,lampyrid.weather)))
 
-plot(x, lampyrid.weather$predicted)
-plot(x, lampyrid.weather$ADULTS)
+plot(x, lampyrid.weather$predicted, ylim=c(0, 100))
+plot(x, lampyrid.weather$ADULTS, ylim=c(0, 100))
 
-test<-lm(predicted~0+ADULTS, data=lampyrid.weather)
-summary(test)
+#let's reshape these data and make a nice plot to show how well the model fits peaks
+
+model.performance<-as.data.frame(cbind(x,lampyrid.weather$predicted,lampyrid.weather$ADULTS))
+names(model.performance)[1]<-"number"
+names(model.performance)[2]<-"Predicted"
+names(model.performance)[3]<-"Observed"
+
+model.performance.1<-melt(model.performance, id="number")
+
+#now we can do a two faceted plot to show this
+
+model.plot<-ggplot(model.performance.1, aes(number, value, fill=as.factor(variable)))+
+  scale_fill_manual(values=pal)+
+  geom_point(colour="black", pch=21, size=2)+
+  theme_bw(base_size = 20)+
+  ylim(0,50)+
+  facet_wrap(~variable, ncol=1)+
+  guides(fill=FALSE)+
+  xlab("\nObservation number")+
+  ylab("# Adults captured\n")
+model.plot
+
+#save to pdf
+pdf("modelplot.pdf", height=6, width=8)
+model.plot
+dev.off()
+
+
+#Let's see how well the model works when we look at data with a lower resolution 
+#(to damp out a bit of sampling variability + make it comparable to our smothed plots from before)
+
+lampyrid.weather.summary<-ddply(lampyrid.weather, c("year", "week"), summarise,
+                                ADULTS=sum(ADULTS), TRAPS=sum(TRAPS), predicted=sum(predicted),
+                                avg=sum(ADULTS)/sum(TRAPS), avgpred=sum(predicted)/sum(TRAPS),
+                                dd.accum=max(dd.accum), rain.days=max(rain.days))
+
+
+lampyrid.summary.ddacc.PRED<-ggplot(lampyrid.weather.summary, aes(dd.accum, avg, 
+                                                                  fill=factor(year)))+
+  
+  scale_fill_manual(values=pal)+
+  geom_smooth(aes(dd.accum, avgpred), color="black", se=FALSE)+
+  geom_point(colour="black", pch=21, size=4)+
+  theme_bw(base_size = 20)+
+  guides(fill=guide_legend(title="Year"))+
+  theme(legend.key=element_blank())+
+  xlab("\nDegree day accumulation")+
+  ylab("Adults per trap\n")
+
+lampyrid.summary.ddacc.PRED
+
+#save to pdf
+pdf("modelddsmoothwithpredicted.pdf", height=6, width=8)
+lampyrid.summary.ddacc.PRED
+dev.off()
+
+#Cool! So now we want to see how the peak is varying by year, and see if there are any environmental parameters that explain it
+#we first need to extract the coefficients from the lam_model
+
+coef<-as.data.frame(summary(lam_model)$coefficients)
+#get rid of those pesky t and P statistics
+coef<-coef[,1:2]
+
+
+
+ddcoef<-coef$Estimate[2]
+dd2coef<-coef$Estimate[3]
+ddcoef.err<-coef$"Std. Error"[2]
+dd2coef.err<-coef$"Std. Error"[3]
+
+#create a vector of years
+year<-(2004:2015)
+
+#create vector of coefficients
+#remember 2004 is the 'intercept' vector so it's unmodified, we'll give it a year 
+#modifier and error of zero
+
+yearcoef<-c(0, coef$Estimate[24:34])
+yearcoef.err<-c(0, coef$"Std. Error"[24:34])
+
+#create a new data frame to integrate the coeficients with the year vector
+peaks<-as.data.frame(cbind(year, yearcoef, yearcoef.err))
+
+#peak will occur at -ddcoeficient/(2(dd2coeficient+year coeficient))
+peaks$peak<- -ddcoef/(2*(dd2coef+yearcoef))
+
+#peak error calculated using the general error propagation formula
+#this will be a bit inelegant, but I calculated the partial derrivatives 
+#relative to each variable myself!
+peaks$peak.err<-sqrt((2*(dd2coef+yearcoef))^(-2) *ddcoef.err^2+
+                       (ddcoef/(2*(dd2coef+yearcoef))^2)^2*(dd2coef.err^2+yearcoef.err^2))
+
+#let's visualize this!
+
+peaks.year<-ggplot(peaks, aes(x=as.factor(year), y=peak, fill=as.factor(year)))+
+  scale_fill_manual(values=pal)+
+  geom_bar(stat="identity", colour="black")+
+  geom_errorbar(aes(ymin=peak-peak.err, ymax=peak+peak.err))+
+  theme_bw(base_size = 20)+
+  guides(fill=FALSE)+
+  ylab("\nDD at peak emergence\n")+
+  xlab("\nYear\n")+
+  theme(axis.text.x=element_text(angle=90))
+peaks.year
+
+#save to pdf
+pdf("modelddpeaksbyyear.pdf", height=6, width=8)
+peaks.year
+dev.off()
+
+#ok, now let's figure out which week each peak occured in
+weeks<-c()
+for (i in 1:length(peaks$year)){
+  #set an arbitrariliy high 'last week' dd caccumulation so the first condition is never
+  #met in the first iteration for each year
+  ddlastweek<-10000
+  for(j in 1:length(weather.by.week$year)){
+    if ((peaks$year[i]==weather.by.week$year[j])&
+        (peaks$peak[i]>ddlastweek)&
+        (peaks$peak[i]<weather.by.week$ddacc[j])){
+      week<-weather.by.week$week[j]
+      weeks<-c(weeks, week)
+      break
+    }
+    else{
+      ddlastweek<-weather.by.week$ddacc[j]
+    }
+  }
+}
+#put it into our peak object
+peaks$week<-weeks
+
+#this allows us to merge in other relevant data with our peak dataset
+peaks<-merge(peaks, captures.by.year, by=c("year"), all.x=TRUE)
+peaks$ddacc<-NULL
+peaks<-merge(peaks, weather.by.week, by=c("year", "week"), all.x=TRUE)
+
+
+dd.vs.precip<-ggplot(peaks, aes(precip.0, peak))+
+  scale_fill_manual(values=pal)+
+  geom_smooth(method="lm", formula=y~poly(x,2), se=FALSE, color="black")+
+  geom_errorbar(aes(ymin=peak-peak.err, ymax=peak+peak.err))+
+  geom_point(aes(fill=as.factor(year)), pch=21, color="black", size=4)+
+  theme_bw(base_size = 20)+
+  guides(fill=guide_legend(title="Year"))+
+  theme(legend.key=element_blank())+
+  xlab("\nPrecipitation accumulation (mm)")+
+  ylab("DD at peak emergence\n")
+
+dd.vs.precip  
+
+#save to pdf
+pdf("modelddpeaksvsprecip.pdf", height=6, width=8)
+dd.vs.precip
+dev.off()
+
+
+peaks$precip.02<-peaks$precip.0^2
+
+env.test<-glm(peak~precip.0+precip.02, data=peaks, family="gaussian")
+summary(env.test)
